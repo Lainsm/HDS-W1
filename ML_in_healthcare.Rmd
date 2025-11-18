@@ -1,0 +1,459 @@
+---
+title: "Is Model Complexity always the answer in Clinical Analysis ? A Comparative Study Using an Open-Source Dataset"
+author: "mjl221@cam.ac.uk"
+date: "`r Sys.Date()`"
+output: 
+  rmdformats::readthedown
+---
+
+```{r setup, message=FALSE, echo=FALSE, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+```{r library, message=FALSE,echo=FALSE}
+
+library(readxl)
+library(readr)
+library(dplyr)
+library(tidyr) 
+library(caret)
+library(caretEnsemble)
+library(pROC)          
+library(randomForest) 
+library(gbm)
+library(DALEX)
+library(DALEXtra)
+library(gtsummary)
+library(ggplot2)
+library(huxtable)
+library(tibble)
+
+```
+
+
+# Introduction
+
+The advent of artificial intelligence (AI) and machine learning (ML) has allowed for new possibilities in the field of health statistics, particularly in the context of diagnosis and prediction. ML models can learn and recognise complex and non-linear patterns that were previously undetectable (Jiang et al., 2020). The healthcare industry demonstrated a certain sluggishness in the implementation these tools, primarily due to the lack of structured digital infrastructure and governance (Emanuel & Wachter, 2019). However, a shift is evident as shown by a survey conducted by the AMA, which reports a 78% increase from 2023 in physicians using some form of health AI (American Medical Association, 2025).
+
+Implementing these innovations don't come without careful planning. As Wolpert's (1997) "No Free Lunch" theorem states, there is no single algorithm that is best for all problems. This challenge in choosing the right tool for the right job is especially critical in healthcare, where the cost of an error is not just statistical. The importance of interpretable analysis is critical in this context. The discussion around the choice of a model and its interpretability should not just be guided by academic curiosity; it must be guided by the real-world necessity of physicians’ liability (Price et al., 2019). Healthcare Data science must become an evolution of traditional Health statistics and in doing so, it must avoid errors that were made in the past. As Hernán et al. (2019) state in their book The Simpson’s paradox unravelled:  "Analytical errors may occur when the problem is stripped of its causal context and analysed merely in statistical terms." Although this refers to causal inference analysis, it can be expanded to encompass the understanding that the comprehension of a predictive model is indispensable for discerning its limitations, liability and impact in healthcare data science.
+
+The necessity of interpretability in the healthcare industry is being recognised. The Good Machine Learning Practice for Medical Device Development (GMLP), a collaboration between the MHRA, the FDA and Health Canada, establishes guiding principles regarding the use of health AI; two of the principles advocate for transparency (U.S. Food and Drug Administration et al., 2021).
+
+•	Principle 7: The model must work alongside the human team and not just independently.
+
+•	Principle 9: The information must be interpretable, and the performance must be appropriate.
+
+In 2024, the guidelines on Principles 7 and 9 were amended, emphasising out the critical need for transparency and human-centred design (U.S. Food and Drug Administration et al., 2024). The European Union (EU) has demonstrated its commitment to the implementation of transparency guidelines by establishing legal frameworks in Articles 13, 14 and 52 of the 2024 EU AI Act (Aboy et al., 2024).
+
+Drawing upon the research conducted by Kuk et al. (2022) about explainable AI (XAI), the focus in this paper does not lie in the tuning of hyperparameters to achieve the optimal predictive model. This paper challenges the assumption that complex machine learning (ML) models are always essential. This research evaluate the trade-off between predictive power and interpretability to determine if the performance gains from using a complex models warrant the associated burden and cost of explainability.
+
+
+# Method
+
+The data selection was carried out after the research question had been defined. I knew that I wanted to research the interpretability of machine learning (ML). I decided to use a dataset that we analysed in our resident week in Cambridge. My aim was to find a dataset containing an output variable and an appropriate number of features, with sufficient records for developing various models.  Initially, I considered the HES data, as it contains the largest number of records. However, the data quality was inconsistent for the purposes of this study. I then examined the Heart Attack and COVID-MS datasets. The heart attack dataset had an output variable and multiple features but lacked interpretability and sufficient records. Some features, such as “slope”, had no additional explanation. While the COVID-MS dataset lacked features and records. Of the four datasets, the CVD dataset available on the course GitHub repository was the best option for testing our research question.
+
+Originally uploaded to Kaggle by the user Sulianova in 2019 under the name “cardiovascular-disease-dataset” (https://www.kaggle.com/datasets/sulianova/cardiovascular-disease-dataset), I identified and acquired it from the course GitHub repository (https://github.com/CambridgeICE-HDS/MSt-Healthcare-Data-Science/Datasets/CDV%20dataset). This dataset is open source and does not require any special access permissions. It contains 12 features and 70,000 records. The values can be categorised into three types: Objective, Examination and Subjective. All values were collected during the patient’s medical examination (Sulianova, 2019). However, we must take the author of the dataset at their word, as there are no time stamps or patient identifiers in the data. The target variable in this dataset is the presence or absence of cardiovascular disease, defined as a binary value.
+
+
+```{r load_data, message=FALSE, echo=FALSE}
+cv_data <- read_excel("CV_dataset.xlsx")
+```
+
+## Data Cleaning & Feature engineering
+
+Although I did not adjust the hyperparameters, I went through a thorough process of data cleansing and engineering to achieve the best possible results for all models. Regarding the data cleansing, the methodology used by Bhatt et al. (2023) provided the necessary inspiration. Their objective was to optimise the predictive power of various models using the same dataset. Their results are noteworthy and the methodology employed to refine the data to achieve such results is clearly delineated. The raw data contained non-physiological values that may have compromised my analysis. The data cleaning pipeline was as followed: (1) removing records where diastolic blood pressure was higher than systolic as this is impossible; (2) The filtering of the blood pressure to a physiologically plausible range. I kept a large range as I am analysing patients with cardiovascular disease. I decided to set the threshold for systolic blood pressure between 90–250 mmHg and for diastolic blood pressure between 60–150 mmHg; finally (3) I removed the top and bottom 2.5% values for height and weight as some outliers were identified. This cleaning pipeline resulted in a final cohort of N= 62,666 records and the removal of 7,334 (10.5%) original entries.
+I then engineered two additional variables from the raw data to create more powerful predictors:(1) The feature `age` was converted from days to years to create an interpretable scale and replaced with the new `age_years` feature. (2) BMI (`bmi`) was calculated from the `height` and `weight` features. (3) Multicollinearity can cause a model to overfit (Brownlee, 2023). Therefore to avoid this issue, the diastolic (`ap_hi`) and systolic (`ap_lo`) pressure features, which are naturally highly correlated as they are physiologically linked, were combined into a single feature: Mean Arterial Pressure (MAP). This new feature was calculated using the standard MAP formula (DeMers & Wachs, 2023).
+
+$$MAP = DP + \frac{1}{3}(SP - DP)$$
+
+After data pre-processing, filtering, and feature engineering, the final study cohort consisted of 62,666 participants and 9 features. The cardio outcome was present in 49% of the cohort. A detailed breakdown of the cohort's baseline characteristics, stratified by the cardio outcome can be seen in Table 1.
+
+
+```{r data_clean,message=FALSE,echo=FALSE}
+
+cv_data_filtered <- cv_data %>%
+  #applied filtering
+  filter(ap_hi>= ap_lo) %>%
+  filter(ap_hi >= 90 & ap_hi <= 250) %>%
+  filter(ap_lo >= 60 & ap_lo <= 150) %>%
+  filter(
+    height >= quantile(height, 0.025) &
+    height <= quantile(height, 0.975) &
+    weight >= quantile(weight, 0.025) &
+    weight <= quantile(weight, 0.975))%>%
+    mutate(age_years = round(age / 365.25))%>%
+  #engineered new variable
+  mutate(bmi = weight / (height/100)^2)%>%
+  mutate(map = (ap_lo+1/3*(ap_hi-ap_lo)))%>%
+  #select only column that are interesting
+  dplyr::select(
+    age_years,
+    gender,
+    bmi,
+    map,        
+    cholesterol,
+    gluc,
+    smoke,
+    alco,
+    active,
+    cardio
+  ) %>%
+  mutate(
+    gender = as.factor(gender),
+    cholesterol = as.factor(cholesterol),
+    gluc = as.factor(gluc),
+    smoke = as.factor(smoke),
+    alco = as.factor(alco),
+    active = as.factor(active),
+    cardio = factor(
+      cardio, 
+      levels = c(0, 1), #from 0,1 to yes/no
+      labels = c("No", "Yes")
+  )
+)
+  
+```
+
+``` {r cohort_chr, message=FALSE,echo=FALSE}
+
+cohort_table <- cv_data_filtered %>%
+  tbl_summary(
+    by = cardio,
+    label = list( 
+      age_years ~ "Age (Years)",
+      bmi ~ "Body Mass Index (kg/m²)",
+      map ~ "Mean Arterial Pressure (mmHg)",
+      cholesterol ~ "Cholesterol Level",
+      gluc ~ "Glucose Level",
+      smoke ~ "Smoker",
+      alco ~ "Alcohol Consumption",
+      active ~ "Physically Active"
+    ),
+    statistic = list(
+      all_continuous() ~ "{mean} ({sd})"
+    ),
+    digits = all_continuous() ~ 1
+  ) %>%
+  add_p()
+
+cohort_table
+
+```
+
+
+
+``` {r data_split, message=FALSE, echo=FALSE}
+
+set.seed(123) 
+trainIndex <- createDataPartition(cv_data_filtered$cardio, p = 0.7, list = FALSE)
+trainData <- cv_data_filtered[trainIndex, ]
+testData <- cv_data_filtered[-trainIndex, ]
+```
+
+
+``` {r k_fold, message_FALSE, echo=FALSE, results="hide"}
+
+cv_control <- trainControl(
+  method = "cv",
+  number = 5,
+  summaryFunction = twoClassSummary,
+  classProbs = TRUE,          
+  savePredictions = "final"
+)
+```
+
+
+## Evaluation
+
+The data was split on the “cardio” feature to keep the balanced distribution. 70% of the data was used for training and 30% for testing. No data leakage was identified; the test was performed using unseen data. The primary metric used to benchmark the performance of our models was the Area Under the Receiver Operating Characteristic Curve (AUC-ROC). The AUC provides a single, robust score measuring a model's ability to discriminate; An AUC value of 0.5 means the model is no better than a random coin-toss (Fawcett, 2006). For healthcare use, an AUC score between 0.70 and 0.80 is considered fair; between 0.80 and 0.90, it is considered clinically useful; and anything above that is considered excellent. (Çorbacıoğlu & Aksel, 2023). 
+
+However the AUC is a theoretical probability which can be hard to interpret in a healthcare setting (Çorbacıoğlu & Aksel, 2023). Therfore, I also derived metrics from the 2x2 table, or more commonly called a confusion matrix of each model. This is a more clinically relevant set of metrics, allowing the user to understand the impact of a prediction (Çorbacıoğlu & Aksel, 2023). A confusion matrix assesses the four possible outcomes: True Positives (TP), True Negatives (TN), False Positives (FP), and False Negatives (FN). We derived sensitivity (the model's ability to identify all positive cases) and specificity (its ability to avoid false alarms) from these counts (Çorbacıoğlu & Aksel, 2023).
+
+I used the Youden index ($J$) to find the model practical and optimal threshold. This index is defined as $$J = sensitivity + specificity – 1$$ and finds the point on the ROC curve that maximises this sum (Çorbacıoğlu & Aksel, 2023). I decided to add this measure because it is simple and clinically clear, as well as being a robust measure of misclassification error. Naturally, sensitivity and specificity tend to compete: the lower the threshold for identifying patients with the disease, the greater the number of healthy people who end up being falsely diagnosed. The main advantage of this measure is that the sum of sensitivity and specificity remains constant around the optimal cut-off point (Böhning et al., 2008).
+
+
+## Models
+
+I selected models from across the spectrum of complexity. As the “glass-box” model, I decided to go with a Generalised Linear Model (GLM). The two “black-box” models are a Random Forest model and a Gradient Boosting Machine model. To prioritise practical utility over exhaustive optimisation, the optimal parameters for each model were selected automatically based on 5-fold cross-validation performance using caret grid search (tuneLength = 3).
+
+**Generalised Linear Model:** This model was chosen as the statistical baseline. It is a “glass-box” model due to its highly interpretable nature. Since the output variable is binary, the model learns from a logistical regression equation. The coefficients of the equation explain the magnitude and direction of each feature's risk (Brownlee, 2023). A positive coefficient indicates that the risk increases, and vice versa. It assumes the effect of each feature is additive and independent and cannot discover complex non-linear patterns (Brownlee, 2023).
+
+**Random Forest:** This model was chosen as the first complex “black-box”. Built on the principle of a decision tree, it directly addresses the overfitting weakness of a single Decision Tree (Badillo et al., 2020). A Random Forest is an ensemble method that builds several decision trees, each trained on a slightly different sample of the data. To make a final prediction, it takes a “vote” from the whole forest. This process makes it more accurate than a single decision tree (Badillo et al., 2020). The downfall for the model performance is the loss of interpretability.
+
+**Gradient Boosting:** Similar to the Random Forest model, Gradient Boosting (GBM) is an ensemble method that combines multiple, shallower decision trees (Badillo et al., 2020). The difference lies in its “boosting” approach. Unlike the RF's voting mechanism, the GBM model builds trees sequentially, with each new tree learning from and correcting the errors of the one before it (Natekin & Knoll, 2013). This significantly improves its predictive performance makes it extremely effective at identifying complex, nonlinear patterns in data (Natekin & Knoll, 2013). However, this power creates two main drawbacks: first, the model itself is difficult to interpret, and secondly, while the model can offer great performance without hyperparameter tuning, it is a model that should be tuned (Badillo et al., 2020).
+
+This research was conducted locally using R on a 13th Gen Intel(R) i7-13850HX processor with 32.0 GB of RAM. The packages used for the analysis were caret, pROC, randomForest, gbm and DALEX. For the tables and the visualisations I used gtsummary, ggplot2 and huxtable. 
+
+
+``` {r model_train,message=FALSE,echo=FALSE, results="hide"}
+
+model_list <- caretList(
+  cardio ~ .,                  # Formula: predict cardio using all other columns
+  data = trainData,            # Use the 70% training set
+  trControl = cv_control,      # Use our 10-fold settings
+  metric = "ROC",              # Select the best model version based on AUC
+  methodList = c("glm", "rf", "gbm"), # The models you requested
+  tuneLength = 3               # Tries 3 hyperparameter values for RF/GBM
+)
+
+```
+
+
+# Results
+
+The three selected models were trained using 5-fold cross-validation and evaluated on an unseen test set. The results for all models are virtually identical. Looking at the AUC curve, no clear winner can be identified. The comparative discrimination of the models can be visualised by their Receiver Operating Characteristic (ROC) curves in Figure 1. Table 2 shows the confusion matrix of all three models. The GBM model showcases slightly higher sensitivity, meaning it can better identify positive cases. On the other hand, the RF and GLM models are better at identifying negative cases. All J-indexs are greater than 0 so all three models performed significantly better than a random guess.
+
+
+``` {r evaluation on AUC_ROC, message=FALSE,echo=FALSE}
+
+
+probs_glm <- predict(model_list$glm, newdata = testData, type = "prob")$Yes
+probs_rf  <- predict(model_list$rf,  newdata = testData, type = "prob")$Yes
+probs_gbm <- predict(model_list$gbm, newdata = testData, type = "prob")$Yes
+
+
+roc_glm   <- roc(testData$cardio, probs_glm, levels = c("No", "Yes"))
+roc_rf    <- roc(testData$cardio, probs_rf,  levels = c("No", "Yes"))
+roc_gbm   <- roc(testData$cardio, probs_gbm, levels = c("No", "Yes"))
+
+
+plot(roc_glm, col = "black", main = "Test Set ROC Curves for All Models")
+lines(roc_rf, col = "grey")
+lines(roc_gbm, col = "navy")
+legend("bottomright",
+       legend = c("GLM", "Random Forest", "GBM"),
+       col = c("black", "grey", "navy"),
+       lwd = c(1, 1, 1, 2))
+
+```
+
+``` {r confusion_youden, message=FALSE, echo=FALSE, results="hide"}
+
+
+pred_glm   <- predict(model_list$glm, newdata = testData, type = "raw")
+pred_rf    <- predict(model_list$rf,  newdata = testData, type = "raw")
+pred_gbm   <- predict(model_list$gbm, newdata = testData, type = "raw")
+
+
+print_metrics <- function(model_name, predictions, reference) {
+  cat(paste("\n--- 2. Metrics for:", model_name, "---\n"))
+
+
+  na_mask <- is.na(predictions) | is.na(reference)
+  if (any(na_mask)) {
+    cat(paste("Note:", sum(na_mask), "rows removed due to NAs in predictions or reference.\n"))
+
+    predictions <- predictions[!na_mask]
+    reference <- reference[!na_mask]
+  }
+
+  predictions <- factor(predictions, levels = levels(reference)) 
+
+  if (length(predictions) == 0) {
+    cat("Error: No valid data left after removing NAs.\n")
+    cat("--------------------------------------\n")
+    return()
+  }
+
+
+  cm <- confusionMatrix(predictions, reference, positive = "Yes")
+  
+  cat("A. Confusion Matrix:\n")
+  print(cm$table)
+  
+ 
+  sensitivity <- cm$byClass["Sensitivity"]
+  specificity <- cm$byClass["Specificity"]
+  j_index <- sensitivity + specificity - 1
+  
+  cat("\nB. Youden's J-Index:", round(j_index, 4), "\n")
+  cat(paste("   (Sensitivity:", round(sensitivity, 4), ")\n"))
+  cat(paste("   (Specificity:", round(specificity, 4), ")\n"))
+  cat("--------------------------------------\n")
+}
+
+
+
+```
+
+```{r all_metric, message=FALSE, echo=FALSE}
+
+
+# --- 2. Get the confusionMatrix objects ---
+cm_glm <- confusionMatrix(pred_glm, testData$cardio, positive = "Yes")
+cm_rf  <- confusionMatrix(pred_rf,  testData$cardio, positive = "Yes")
+cm_gbm <- confusionMatrix(pred_gbm, testData$cardio, positive = "Yes")
+
+# --- 3. Extract the tables and rename columns ---
+# We convert each table to a data.frame
+# Then we rename the columns to be unique, e.g., "GLM (No)"
+df_glm <- as.data.frame.matrix(cm_glm$table)
+names(df_glm) <- c("GLM (No)", "GLM (Yes)")
+
+df_rf  <- as.data.frame.matrix(cm_rf$table)
+names(df_rf) <- c("RF (No)", "RF (Yes)")
+
+df_gbm <- as.data.frame.matrix(cm_gbm$table)
+names(df_gbm) <- c("GBM (No)", "GBM (Yes)")
+
+# --- 4. Build ONE final table ---
+# We column-bind them together, and add the "Prediction" row names as the first column.
+final_table <- cbind(
+  Prediction = rownames(df_glm), 
+  df_glm, 
+  df_rf, 
+  df_gbm
+)
+
+# --- 5. Print the final, clean table ---
+as_hux(final_table) %>%
+  set_align(everywhere, everywhere, "center") %>% # Center all text
+  set_bottom_border(1, everywhere, 1) %>%       # Underline headers
+  set_all_borders(1)                            # Add cell borders              # Add cell borders 
+
+```
+
+To pry open the models and identify the most influential risk factors, I also conducted a permutation importance analysis on each model. This method quantifies the extent to which a model's performance diminishes when a specific feature is scrambled, as measured by a 1-AUC drop. As Figure 2 shows, there is a consensus among all three models. The engineered mean arterial pressure feature was identified as the most significant predictor by a significant margin. Age was the second most significant feature. Cholesterol and BMI were moderately important in prediction. One interesting finding of this analysis is that lifestyle factors such as smoking, alcohol consumption and physical activity exerted a negligible predictive influence.
+
+
+``` {r feature_importance, message=FALSE, echo=FALSE, results="hide"}
+
+
+expl_glm <- DALEX::explain(model_list$glm,
+                           data = dplyr::select(testData, -cardio),
+                           y = testData$cardio == "Yes",
+                           label = "GLM")
+
+expl_rf <- DALEX::explain(model_list$rf,
+                          data = dplyr::select(testData, -cardio),
+                          y = testData$cardio == "Yes",
+                          label = "Random Forest")
+
+expl_gbm <- DALEX::explain(model_list$gbm,
+                           data = dplyr::select(testData, -cardio),
+                           y = testData$cardio == "Yes",
+                           label = "GBM")
+
+
+
+vip_glm <- DALEX::model_parts(expl_glm, N = NULL, type = "variable_importance")
+vip_rf  <- DALEX::model_parts(expl_rf,  N = NULL, type = "variable_importance")
+vip_gbm <- DALEX::model_parts(expl_gbm, N = NULL, type = "variable_importance")
+
+# Combine your three importance objects into one data frame
+vip_all <- rbind(vip_glm, vip_rf, vip_gbm)
+```
+
+
+```{r feature_importance_plot, message=FALSE,echo=FALSE}
+
+# Create the new dot plot
+ggplot(vip_all, 
+       aes(x = dropout_loss, y = reorder(variable, dropout_loss, FUN = mean), 
+           color = label)) +
+  
+  # Draw a light grey line to connect the dots for each feature
+  geom_line(aes(group = variable), color = "grey", alpha = 0.7) +
+  
+  # Draw the colored dots for each model
+  geom_point(size = 3) +
+  
+  # Add labels and a clean theme
+  labs(
+    title = "Comparative Feature Importance",
+    subtitle = "Directly compares which features each model values most",
+    x = "Importance (One minus AUC loss after permutation)",
+    y = "Feature",
+    color = "Model"  # This will title your legend
+  ) +
+  theme_minimal()
+
+```
+
+Table 3 provides a detailed breakdown of each model's complete performance metrics. The Gradient Boosting Machine (GBM) achieved the highest AUC and provided a slightly better overall performance. Overall, the “black-box” ML models did not outperform the simple “glass-box” model.
+
+```{r all_metrics, message=FALSE,echo=FALSE}
+# Get AUCs
+auc_glm <- round(auc(roc_glm), 4)
+auc_rf  <- round(auc(roc_rf), 4)
+auc_gbm <- round(auc(roc_gbm), 4)
+
+# Get Sensitivities
+sens_glm <- round(cm_glm$byClass['Sensitivity'], 4)
+sens_rf  <- round(cm_rf$byClass['Sensitivity'], 4)
+sens_gbm <- round(cm_gbm$byClass['Sensitivity'], 4)
+
+# Get Specificities
+spec_glm <- round(cm_glm$byClass['Specificity'], 4)
+spec_rf  <- round(cm_rf$byClass['Specificity'], 4)
+spec_gbm <- round(cm_gbm$byClass['Specificity'], 4)
+
+# Calculate Youden's J-Index
+j_glm <- round(sens_glm + spec_glm - 1, 4)
+j_rf  <- round(sens_rf + spec_rf - 1, 4)
+j_gbm <- round(sens_gbm + spec_gbm - 1, 4)
+
+
+# --- 3. Build ONE final data.frame ---
+# This is the cleanest way to build the table
+final_metrics_table <- data.frame(
+  Metric = c("AUC", "Youden's J-Index", "Sensitivity", "Specificity"),
+  GLM = c(auc_glm, j_glm, sens_glm, spec_glm),
+  `Random Forest` = c(auc_rf, j_rf, sens_rf, spec_rf),
+  GBM = c(auc_gbm, j_gbm, sens_gbm, spec_gbm),
+  check.names = FALSE # Allows the space in "Random Forest"
+)
+
+# --- 4. Print the final, styled table ---
+as_hux(final_metrics_table) %>%
+  set_width("100%") %>%
+  set_align(everywhere, everywhere, "center") %>% # Center everything
+  set_align(1, 1, "left") %>%                     # Left-align "Metric" header
+  set_align(2:5, 1, "left") %>%                 # Left-align the metric names
+  set_bold(1, everywhere, TRUE) %>%             # Bold the header row
+  set_bold(everywhere, 1, TRUE) %>%             # Bold the first column
+  set_bottom_border(1, everywhere, 1) %>%       # Underline header
+  set_all_borders(1)                            # Add cell borders# Add cell borders                           # Add cell borders                         # Add cell borders
+
+```
+
+
+# Discussion 
+
+This report set out to compare the utility of a simple, interpretable model (Logistic Regression/GLM) against more complex, classic "black-box" models for CVD prediction. The primary finding was not that one model was superior, but that all three models performed at a strikingly similar level. While the Gradient Boosting Machine (GBM) was technically the top performer, this performance was a mere improvement over the interpretable GLM. All models agreed on the key predictors, identifying mean arterial pressure and age as the most critical factors by a significant margin. In the context of the regulatory landscapes (like the EU AI Act and FDA guidelines) that demand transparency and human-in-the-loop, the small gain of using a complex model in this scenario can be dwarfed by the practical, legal, and ethical costs. A physician could look at the GLM's coefficients and understand how the risk score was calculated, satisfying Principles 7 and 9 of the GMLP.
+
+This marks the need for a model to be an evolution of traditional health statistics, not an opaque replacement. Before using extensive XAI techniques to "explain" a complex model it may be interesting looking into a simpler, inherently interpretable model that could provide the same answer for the same analysis. The findings suggest that for this problem, the GLM is the most practical and compliant choice.
+
+It is important to note that the present study contains a certain number of limitations. Firstly, the data is an open-source dataset with no patient identification information and the method by which the data was collected raises questions regarding its real-world applicability. Furthermore, the data only provides a brief overview of the patients' characteristics. The absence of supplementary data, such as medication information which could impact our main predictor (MAP), restricts the analytical score. Furthermore, as the dataset is a static photograph, I am lacking information regarding disease severity, duration or future onset. Finally, the results of the feature importance analysis suggested low importance assigned to lifestyle factors such as smoking status and physical activity, this could be due to the self-reporting nature of the data rather than reflecting a true lack of medical importance.
+Future work should not necessarily focus on finding a more complex algorithm. Instead, it should focus on collecting additional data point and selecting the appropriate model. The clear next step is to use a dataset where participants are followed over time and incorporating data with higher fidelity (e.g., electronic health records, medication history). This would likely improve the performance of all models, including the GLM.
+
+
+
+# Conclusion
+
+This research set out to determine if more complex and less interpretable machine learning models always offer a significant and practical advantage over simpler interpretable models in healthcare prediction. My findings were decisive: the performance gains from the use of a more complicated model on this dataset are virtually non-existent. The transparent logistic regression provided nearly identical predictive power and better interpretability.
+The continuous innovation in ML is impressive and welcomed but there is no free lunch. The right model needs to be used for the right analysis. Given the new and stringent regulatory focus on model transparency and human oversight in healthcare AI, the immediate decision to use a complex model can be outweighed by its practical, resource and legal costs. We conclude that for this problem, the interpretable GLM should be seen as more than a viable alternative but as the superior choice. It provided a robust, effective, and critical transparent tool for clinical assistive diagnostics that aligns with the future of safe and responsible medical prediction.
+
+# Reference
+
+American Medical Association. (2025, February 26). 2 in 3 physicians are using health AI—up 78% from 2023. American Medical Association. https://www.ama-assn.org/practice-management/digital-health/2-3-physicians-are-using-health-ai-78-2023
+Badillo, S., Banfai, B., Birzele, F., Davydov, I. I., Hutchinson, L., Kam-Thong, T., Siebourg-Polster, J., Steiert, B., & Zhang, J. D. (2020). An Introduction to Machine Learning. Clinical pharmacology and therapeutics, 107(4), 871–885. https://doi.org/10.1002/cpt.1796
+Bhatt, C. M., Patel, P., Ghetia, T., & Mazzeo, P. L. (2023). Effective Heart Disease Prediction Using Machine Learning Techniques. Algorithms, 16(2), 88. https://doi.org/10.3390/a16020088
+Böhning, D., Böhning, W., & Holling, H. (2008). Revisiting Youden's index as a useful measure of the misclassification error in meta-analysis of diagnostic studies. Statistical Methods in Medical Research, 17(1), 1–12. https://doi.org/10.1177/0962280208081867
+Çorbacıoğlu, Ş. K., & Aksel, G. (2023). Receiver operating characteristic curve analysis in diagnostic accuracy studies: A guide to interpreting the area under the curve value. Turkish journal of emergency medicine, 23(4), 195–198. https://doi.org/10.4103/tjem.tjem_182_23
+DeMers, D., & Wachs, D. (2023). Physiology, Mean Arterial Pressure. StatPearls Publishing. https://www.ncbi.nlm.nih.gov/books/NBK538508/
+Emanuel, E. J., & Wachter, R. M. (2019). Artificial Intelligence in Health Care: Will the Value Match the Hype?  JAMA, 321(23), 2281–2282. https://doi.org/10.1001/jama.2019.4914
+Hernán, M. A., Hsu, J., & Healy, B. (2019). A second chance to get causal inference right: A classification of data science tasks. Chance, 32(1), 42–49. https://doi.org/10.1080/ 09332480.2019.1579578
+Hernán, M. A., Clayton, D., & Keiding, N. (2011). The Simpson's paradox unraveled. International journal of epidemiology, 40(3), 780–785. https://doi.org/10.1093/ije/dyr041
+Kuk, M., Bobek, S., & Nalepa, G. J. (2022). Comparing explanations from glass-box and black-box machine-learning models [Paper presentation]. 22nd International Conference on Computational Science, London, United Kingdom. https://www.iccs-meeting.org/archive/iccs2022/papers/133520649.pdf
+Price, W. N., 2nd, Gerke, S., & Cohen, I. G. (2019). Potential Liability for Physicians Using Artificial Intelligence. JAMA, 322(18), 1765–1766. https://doi.org/10.1001/jama.2019.15064
+Jiang, T., Gradus, J. L., & Rosellini, A. J. (2020). Supervised machine learning: A brief primer. Behavior Therapy, 51(5), 675–687. https://doi.org/10.1016/j.beth.2020.05.002
+Wolpert, D. H., & Macready, W. G. (1997). No free lunch theorems for optimization. IEEE Transactions on Evolutionary Computation, 1(1), 67–82. https://doi.org/10.1109/4235.585893
+Sulianova, A. (2019). Cardiovascular Disease dataset. Kaggle. Retrieved November 4, 2025, from https://www.kaggle.com/datasets/sulianova/cardiovascular-disease-dataset
+Ünalan, S., Günay, O., Akkurt, I., Gunoglu, K., & Tekin, H. O. (2024). A comparative study on breast cancer classification with stratified shuffle split and K-fold cross validation via ensembled machine learning. Journal of Radiation Research and Applied Sciences, 17(4), 101080. https://doi.org/10.1016/j.jrras.2024.101080
+U.S. Food and Drug Administration, Health Canada, & Medicines and Healthcare products Regulatory Agency. (2021, October). Good machine learning practice for medical device development: Guiding principles. U.S. Food and Drug Administration. https://www.fda.gov/medical-devices/software-medical-device-samd/good-machine-learning-practice-medical-device-development-guiding-principles
+U.S. Food and Drug Administration, Health Canada, & Medicines and Healthcare products Regulatory Agency. (2024, June 13). Transparency for machine learning-enabled medical devices: Guiding principles. U.S. Food and Drug Administration. https://www.fda.gov/medical-devices/software-medical-device-samd/transparency-machine-learning-enabled-medical-devices-guiding-principles
+
+
+
+
