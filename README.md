@@ -1,5 +1,7 @@
 # HDS-W1
 
+First module project for Cambridge university. The assignment was to come up with a research question on 4 dataset presented during our resident week. After reviewing the various dataset, I came up with a research question around the immediate use of complex model in Healthcare.
+
 **Background:** Although it is a latecomer, the healthcare industry is increasingly integrating machine learning (ML) and artificial intelligence (AI). However, this growth has highlighted challenges relating to the trade-off between model accuracy and interpretability. International regulatory bodies, such as the MHRA, the FDA, Health Canada and the European Union are demanding greater transparency and human oversight of AI in clinical systems (GMLP Principles 7 and 9; EU AI Act). This incurs additional resources and requires careful consideration when choosing a model.
 
 **Objective:** This study aims to challenge the assumption that complex, “black-box” ML models always provide a significant advantage over a simple, “glass-box” model for clinical prediction.
